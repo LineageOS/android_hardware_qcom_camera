@@ -35,7 +35,7 @@
 #include <media/msmb_camera.h>
 
 #define CAM_MAX_NUM_BUFS_PER_STREAM 64
-#define MAX_METADATA_PRIVATE_PAYLOAD_SIZE_IN_BYTES 11220
+#define MAX_METADATA_PRIVATE_PAYLOAD_SIZE_IN_BYTES 11224
 #define AWB_DEBUG_DATA_SIZE               (45000)
 #define AEC_DEBUG_DATA_SIZE               (5000)
 #define AF_DEBUG_DATA_SIZE                (60000)
@@ -156,7 +156,7 @@
 
 #define MAX_VIDEO_BUFFERS 30
 
-#define QCAMERA_DUMP_FRM_LOCATION "/data/misc/camera/"
+#define QCAMERA_DUMP_FRM_LOCATION "/data/vendor/camera/"
 #define QCAMERA_MAX_FILEPATH_LENGTH 64
 
 #define LIKELY(x)       __builtin_expect((x), true)
@@ -2758,6 +2758,7 @@ typedef struct {
 #define CAM_QTI_FEATURE_RTBDM           (((cam_feature_mask_t)1UL)<<43)
 #define CAM_QTI_FEATURE_BINNING_CORRECTION (((cam_feature_mask_t)1UL)<<44)
 #define CAM_QTI_FEATURE_RTB             (((cam_feature_mask_t)1UL)<<45)
+#define CAM_QCOM_FEATURE_GOOG_ZOOM      (((cam_feature_mask_t)1UL)<<46)
 #define CAM_QCOM_FEATURE_PP_SUPERSET    (CAM_QCOM_FEATURE_DENOISE2D|CAM_QCOM_FEATURE_CROP|\
                                          CAM_QCOM_FEATURE_ROTATION|CAM_QCOM_FEATURE_SHARPNESS|\
                                          CAM_QCOM_FEATURE_SCALE|CAM_QCOM_FEATURE_CAC|\
@@ -3139,5 +3140,12 @@ typedef struct {
   int reserved_i[16];
   float reserved_f[16];
 }tuning_mod1_data_AF;
+
+
+// Used with MSM_CAMERA_PRIV_STREAM_ON.
+typedef enum {
+    CAM_STREAM_ON_TYPE_CONFIG, // Configure modules for stream ON without starting sensor streaming.
+    CAM_STREAM_ON_TYPE_START_SENSOR_STREAMING, // Start sensor streaming.
+} cam_stream_on_type_t;
 
 #endif /* __QCAMERA_TYPES_H__ */

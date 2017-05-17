@@ -500,7 +500,7 @@ private:
         List<RequestedBufferInfo> buffers;
         List<InternalRequest> internalRequestList;
         int blob_request;
-        uint8_t bUrgentReceived;
+        uint8_t bUseFirstPartial; // Use first available partial result in case of jumpstart.
         nsecs_t timestamp;
         camera3_stream_buffer_t *input_buffer;
         const camera_metadata_t *settings;
@@ -655,6 +655,11 @@ private:
     int (*LINK_get_surface_pixel_alignment)();
     uint32_t mSurfaceStridePadding;
 
+    bool mFirstMetadataCallback;
+    void sendPartialMetadataWithLock(metadata_buffer_t *metadata,
+            const pendingRequestIterator requestIter,
+            bool lastUrgentMetadataInBatch);
+
     State mState;
     //Dual camera related params
     bool mIsDeviceLinked;
@@ -717,6 +722,7 @@ private:
     // HDR+ client callbacks.
     void onOpened(std::unique_ptr<HdrPlusClient> client) override;
     void onOpenFailed(status_t err) override;
+    void onFatalError() override;
     void onCaptureResult(pbcamera::CaptureResult *result,
             const camera_metadata_t &resultMetadata) override;
     void onFailedCaptureResult(pbcamera::CaptureResult *failedResult) override;
