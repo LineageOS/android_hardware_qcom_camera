@@ -853,6 +853,7 @@ int QCamera3HardwareInterface::openCamera(struct hw_device_t **hw_device)
         return PERMISSION_DENIED;
     }
 
+    logEaselEvent("EASEL_STARTUP_LATENCY", "Camera Open");
     mPerfLockMgr.acquirePerfLock(PERF_LOCK_OPEN_CAMERA);
     LOGI("[KPI Perf]: E PROFILE_OPEN_CAMERA camera id %d",
              mCameraId);
@@ -2232,6 +2233,7 @@ int QCamera3HardwareInterface::configureStreamsPerfLocked(
         pthread_mutex_unlock(&mMutex);
         return rc;
     }
+    mMetadataChannel->enableDepthData(depthPresent);
     rc = mMetadataChannel->initialize(IS_TYPE_NONE);
     if (rc < 0) {
         LOGE("metadata channel initialization failed");
@@ -4815,6 +4817,7 @@ int QCamera3HardwareInterface::processCaptureRequest(
     // For first capture request, send capture intent, and
     // stream on all streams
     if (mState == CONFIGURED) {
+        logEaselEvent("EASEL_STARTUP_LATENCY", "First request");
         // send an unconfigure to the backend so that the isp
         // resources are deallocated
         if (!mFirstConfiguration) {
@@ -5955,6 +5958,7 @@ no_error:
                             pthread_mutex_unlock(&mMutex);
                             return rc;
                         }
+                        logEaselEvent("EASEL_STARTUP_LATENCY", "Starting MIPI done");
                     }
                 }
 
@@ -9476,8 +9480,8 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
                         gCamCapability[cameraId]->picture_sizes_tbl[i],
                         ANDROID_SCALER_AVAILABLE_STREAM_CONFIGURATIONS_OUTPUT);
                 /*For below 2 formats we also support i/p streams for reprocessing advertise those*/
-                if (scalar_formats[j] == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED ||
-                        scalar_formats[j] == HAL_PIXEL_FORMAT_YCbCr_420_888) {
+                if ((scalar_formats[j] == HAL_PIXEL_FORMAT_IMPLEMENTATION_DEFINED ||
+                        scalar_formats[j] == HAL_PIXEL_FORMAT_YCbCr_420_888) && i == 0) {
                      if ((gCamCapability[cameraId]->picture_sizes_tbl[i].width
                             >= minInputSize.width) || (gCamCapability[cameraId]->
                             picture_sizes_tbl[i].height >= minInputSize.height)) {
@@ -14641,6 +14645,7 @@ void QCamera3HardwareInterface::onOpened(std::unique_ptr<HdrPlusClient> client)
         return;
     }
 
+    logEaselEvent("EASEL_STARTUP_LATENCY", "HDR+ client opened.");
     ALOGI("%s: HDR+ client opened.", __FUNCTION__);
 
     Mutex::Autolock l(gHdrPlusClientLock);
