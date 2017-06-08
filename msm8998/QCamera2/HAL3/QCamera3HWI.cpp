@@ -133,6 +133,9 @@ namespace qcamera {
 // Max preferred zoom
 #define MAX_PREFERRED_ZOOM_RATIO 7.0
 
+// TODO: Enable HDR+ for front camera after it's supported. b/37100623.
+#define ENABLE_HDRPLUS_FOR_FRONT_CAMERA 0
+
 // Whether to check for the GPU stride padding, or use the default
 //#define CHECK_GPU_PIXEL_ALIGNMENT
 
@@ -5893,7 +5896,7 @@ no_error:
     }
 
     // Enable HDR+ mode for the first PREVIEW_INTENT request.
-    {
+    if (ENABLE_HDRPLUS_FOR_FRONT_CAMERA || mCameraId == 0) {
         Mutex::Autolock l(gHdrPlusClientLock);
         if (gEaselManagerClient.isEaselPresentOnDevice() &&
                 !gEaselBypassOnly && !mFirstPreviewIntentSeen &&
@@ -9982,7 +9985,9 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
     }
 
     if (gExposeEnableZslKey) {
-        available_request_keys.add(ANDROID_CONTROL_ENABLE_ZSL);
+        if (ENABLE_HDRPLUS_FOR_FRONT_CAMERA || cameraId == 0) {
+            available_request_keys.add(ANDROID_CONTROL_ENABLE_ZSL);
+        }
     }
 
     staticInfo.update(ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS,
@@ -14496,6 +14501,7 @@ status_t QCamera3HardwareInterface::configureHdrPlusStreamsLocked()
         inputConfig.sensorMode.activeArrayWidth = mSensorModeInfo.active_array_size.width;
         inputConfig.sensorMode.activeArrayHeight = mSensorModeInfo.active_array_size.height;
         inputConfig.sensorMode.outputPixelClkHz = mSensorModeInfo.op_pixel_clk;
+        inputConfig.sensorMode.timestampOffsetNs = mSensorModeInfo.timestamp_offset;
         if (mSensorModeInfo.num_raw_bits != 10) {
             ALOGE("%s: Only RAW10 is supported but this sensor mode has %d raw bits.", __FUNCTION__,
                     mSensorModeInfo.num_raw_bits);
