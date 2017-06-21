@@ -65,6 +65,7 @@ extern "C" {
 }
 #include "cam_cond.h"
 
+using ::android::hardware::camera::common::V1_0::helper::CameraMetadata;
 using namespace android;
 
 namespace qcamera {
@@ -132,9 +133,6 @@ namespace qcamera {
 
 // Max preferred zoom
 #define MAX_PREFERRED_ZOOM_RATIO 7.0
-
-// TODO: Enable HDR+ for front camera after it's supported. b/37100623.
-#define ENABLE_HDRPLUS_FOR_FRONT_CAMERA 0
 
 // Whether to check for the GPU stride padding, or use the default
 //#define CHECK_GPU_PIXEL_ALIGNMENT
@@ -459,6 +457,7 @@ QCamera3HardwareInterface::QCamera3HardwareInterface(uint32_t cameraId,
       mHdrPlusRawSrcChannel(NULL),
       mDummyBatchChannel(NULL),
       mDepthChannel(NULL),
+      mDepthCloudMode(CAM_PD_DATA_SKIP),
       mPerfLockMgr(),
       mChannelHandle(0),
       mFirstConfiguration(true),
@@ -2273,6 +2272,7 @@ int QCamera3HardwareInterface::configureStreamsPerfLocked(
     if (mDepthChannel) {
         mDepthChannel = NULL;
     }
+    mDepthCloudMode = CAM_PD_DATA_SKIP;
 
     mShutterDispatcher.clear();
     mOutputBufferDispatcher.clear();
@@ -5759,13 +5759,34 @@ no_error:
             return -EINVAL;
         }
 
-        int32_t pdafEnable = depthRequestPresent ? 1 : 0;
+        cam_sensor_pd_data_t pdafEnable = (nullptr != mDepthChannel) ?
+                CAM_PD_DATA_SKIP : CAM_PD_DATA_DISABLED;
+        if (depthRequestPresent && mDepthChannel) {
+            if (request->settings) {
+                camera_metadata_ro_entry entry;
+                if (find_camera_metadata_ro_entry(request->settings,
+                        NEXUS_EXPERIMENTAL_2017_PD_DATA_ENABLE, &entry) == 0) {
+                    if (entry.data.u8[0]) {
+                        pdafEnable = CAM_PD_DATA_ENABLED;
+                    } else {
+                        pdafEnable = CAM_PD_DATA_SKIP;
+                    }
+                    mDepthCloudMode = pdafEnable;
+                } else {
+                    pdafEnable = mDepthCloudMode;
+                }
+            } else {
+                pdafEnable = mDepthCloudMode;
+            }
+        }
+
         if (ADD_SET_PARAM_ENTRY_TO_BATCH(mParameters,
                 CAM_INTF_META_PDAF_DATA_ENABLE, pdafEnable)) {
             LOGE("%s: Failed to enable PDAF data in parameters!", __func__);
             pthread_mutex_unlock(&mMutex);
             return BAD_VALUE;
         }
+
         if (request->input_buffer == NULL) {
             /* Set the parameters to backend:
              * - For every request in NORMAL MODE
@@ -5954,7 +5975,7 @@ no_error:
     }
 
     // Enable HDR+ mode for the first PREVIEW_INTENT request.
-    if (ENABLE_HDRPLUS_FOR_FRONT_CAMERA || mCameraId == 0) {
+    {
         Mutex::Autolock l(gHdrPlusClientLock);
         if (gEaselManagerClient.isEaselPresentOnDevice() &&
                 !gEaselBypassOnly && !mFirstPreviewIntentSeen &&
@@ -9259,6 +9280,8 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
                 gCamCapability[cameraId]->raw_meta_dim[indexPD].width;
         int32_t depthHeight =
                 gCamCapability[cameraId]->raw_meta_dim[indexPD].height;
+        int32_t depthStride =
+                gCamCapability[cameraId]->raw_meta_dim[indexPD].width * 2;
         int32_t depthSamplesCount = (depthWidth * depthHeight * 2) / 16;
         assert(0 < depthSamplesCount);
         staticInfo.update(ANDROID_DEPTH_MAX_DEPTH_SAMPLES,
@@ -9288,6 +9311,10 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
 
         uint8_t depthExclusive = ANDROID_DEPTH_DEPTH_IS_EXCLUSIVE_FALSE;
         staticInfo.update(ANDROID_DEPTH_DEPTH_IS_EXCLUSIVE, &depthExclusive, 1);
+
+        int32_t pd_dimensions [] = {depthWidth, depthHeight, depthStride};
+        staticInfo.update(NEXUS_EXPERIMENTAL_2017_PD_DATA_DIMENSIONS,
+                pd_dimensions, sizeof(pd_dimensions) / sizeof(pd_dimensions[0]));
     }
 
     int32_t scalar_formats[] = {
@@ -10035,6 +10062,7 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
        NEXUS_EXPERIMENTAL_2017_HISTOGRAM_BINS,
        TANGO_MODE_DATA_SENSOR_FULLFOV,
        NEXUS_EXPERIMENTAL_2017_TRACKING_AF_TRIGGER,
+       NEXUS_EXPERIMENTAL_2017_PD_DATA_ENABLE,
        };
 
     size_t request_keys_cnt =
@@ -10046,9 +10074,7 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
     }
 
     if (gExposeEnableZslKey) {
-        if (ENABLE_HDRPLUS_FOR_FRONT_CAMERA || cameraId == 0) {
-            available_request_keys.add(ANDROID_CONTROL_ENABLE_ZSL);
-        }
+        available_request_keys.add(ANDROID_CONTROL_ENABLE_ZSL);
     }
 
     staticInfo.update(ANDROID_REQUEST_AVAILABLE_REQUEST_KEYS,
