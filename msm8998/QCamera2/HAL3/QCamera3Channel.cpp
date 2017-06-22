@@ -890,7 +890,26 @@ void QCamera3ProcessingChannel::streamCbRoutine(mm_camera_super_buf_t *super_fra
            if (mOutOfSequenceBuffers.empty()) {
               stream->cancelBuffer(oldestBufIndex);
            }
-           mOutOfSequenceBuffers.push_back(super_frame);
+
+           //push in order!
+           auto itr = mOutOfSequenceBuffers.begin();
+           for (; itr != mOutOfSequenceBuffers.end(); itr++) {
+               mm_camera_super_buf_t *super_buf = *itr;
+               uint32_t buf_idx = super_buf->bufs[0]->buf_idx;
+               int32_t frame_num = mMemory.getFrameNumber(buf_idx);
+               if (resultFrameNumber < frame_num) {
+                   LOGE("Out of order frame!! set buffer status error flag!");
+                   mOutOfSequenceBuffers.insert(itr, super_frame);
+                   super_buf->bufs[0]->flags |= V4L2_BUF_FLAG_ERROR;
+                   break;
+               }
+           }
+
+           if (itr == mOutOfSequenceBuffers.end()) {
+               LOGE("Add the frame to the end of mOutOfSequenceBuffers");
+               // add the buffer
+               mOutOfSequenceBuffers.push_back(super_frame);
+           }
            return;
        }
 
@@ -4309,6 +4328,7 @@ void QCamera3ReprocessChannel::streamCbRoutine(mm_camera_super_buf_t *super_fram
     //Got the pproc data callback. Now send to jpeg encoding
     uint8_t frameIndex;
     uint32_t resultFrameNumber;
+    ATRACE_CALL();
     mm_camera_super_buf_t* frame = NULL;
     QCamera3ProcessingChannel *obj = (QCamera3ProcessingChannel *)inputChHandle;
     cam_dimension_t dim;
@@ -4921,6 +4941,7 @@ int32_t QCamera3ReprocessChannel::overrideFwkMetadata(
     int32_t rc = 0;
     int index;
     OfflineBuffer mappedBuffer;
+    ATRACE_CALL();
 
     if (m_numStreams < 1) {
         LOGE("No reprocess stream is created");
