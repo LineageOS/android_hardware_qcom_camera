@@ -457,7 +457,6 @@ QCamera3HardwareInterface::QCamera3HardwareInterface(uint32_t cameraId,
       mHdrPlusRawSrcChannel(NULL),
       mDummyBatchChannel(NULL),
       mDepthChannel(NULL),
-      mDepthCloudMode(CAM_PD_DATA_SKIP),
       mPerfLockMgr(),
       mChannelHandle(0),
       mFirstConfiguration(true),
@@ -2272,7 +2271,6 @@ int QCamera3HardwareInterface::configureStreamsPerfLocked(
     if (mDepthChannel) {
         mDepthChannel = NULL;
     }
-    mDepthCloudMode = CAM_PD_DATA_SKIP;
 
     mShutterDispatcher.clear();
     mOutputBufferDispatcher.clear();
@@ -5509,7 +5507,7 @@ no_error:
 
     // Let shutter dispatcher and buffer dispatcher know shutter and output buffers are expected
     // for the frame number.
-    mShutterDispatcher.expectShutter(frameNumber);
+    mShutterDispatcher.expectShutter(frameNumber, request->input_buffer != nullptr);
     for (size_t i = 0; i < request->num_output_buffers; i++) {
         mOutputBufferDispatcher.expectBuffer(frameNumber, request->output_buffers[i].stream);
     }
@@ -5759,34 +5757,13 @@ no_error:
             return -EINVAL;
         }
 
-        cam_sensor_pd_data_t pdafEnable = (nullptr != mDepthChannel) ?
-                CAM_PD_DATA_SKIP : CAM_PD_DATA_DISABLED;
-        if (depthRequestPresent && mDepthChannel) {
-            if (request->settings) {
-                camera_metadata_ro_entry entry;
-                if (find_camera_metadata_ro_entry(request->settings,
-                        NEXUS_EXPERIMENTAL_2017_PD_DATA_ENABLE, &entry) == 0) {
-                    if (entry.data.u8[0]) {
-                        pdafEnable = CAM_PD_DATA_ENABLED;
-                    } else {
-                        pdafEnable = CAM_PD_DATA_SKIP;
-                    }
-                    mDepthCloudMode = pdafEnable;
-                } else {
-                    pdafEnable = mDepthCloudMode;
-                }
-            } else {
-                pdafEnable = mDepthCloudMode;
-            }
-        }
-
+        int32_t pdafEnable = depthRequestPresent ? 1 : 0;
         if (ADD_SET_PARAM_ENTRY_TO_BATCH(mParameters,
                 CAM_INTF_META_PDAF_DATA_ENABLE, pdafEnable)) {
             LOGE("%s: Failed to enable PDAF data in parameters!", __func__);
             pthread_mutex_unlock(&mMutex);
             return BAD_VALUE;
         }
-
         if (request->input_buffer == NULL) {
             /* Set the parameters to backend:
              * - For every request in NORMAL MODE
@@ -9280,8 +9257,6 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
                 gCamCapability[cameraId]->raw_meta_dim[indexPD].width;
         int32_t depthHeight =
                 gCamCapability[cameraId]->raw_meta_dim[indexPD].height;
-        int32_t depthStride =
-                gCamCapability[cameraId]->raw_meta_dim[indexPD].width * 2;
         int32_t depthSamplesCount = (depthWidth * depthHeight * 2) / 16;
         assert(0 < depthSamplesCount);
         staticInfo.update(ANDROID_DEPTH_MAX_DEPTH_SAMPLES,
@@ -9311,10 +9286,6 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
 
         uint8_t depthExclusive = ANDROID_DEPTH_DEPTH_IS_EXCLUSIVE_FALSE;
         staticInfo.update(ANDROID_DEPTH_DEPTH_IS_EXCLUSIVE, &depthExclusive, 1);
-
-        int32_t pd_dimensions [] = {depthWidth, depthHeight, depthStride};
-        staticInfo.update(NEXUS_EXPERIMENTAL_2017_PD_DATA_DIMENSIONS,
-                pd_dimensions, sizeof(pd_dimensions) / sizeof(pd_dimensions[0]));
     }
 
     int32_t scalar_formats[] = {
@@ -10062,7 +10033,6 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
        NEXUS_EXPERIMENTAL_2017_HISTOGRAM_BINS,
        TANGO_MODE_DATA_SENSOR_FULLFOV,
        NEXUS_EXPERIMENTAL_2017_TRACKING_AF_TRIGGER,
-       NEXUS_EXPERIMENTAL_2017_PD_DATA_ENABLE,
        };
 
     size_t request_keys_cnt =
@@ -14878,29 +14848,43 @@ void QCamera3HardwareInterface::onFailedCaptureResult(pbcamera::CaptureResult *f
 ShutterDispatcher::ShutterDispatcher(QCamera3HardwareInterface *parent) :
         mParent(parent) {}
 
-void ShutterDispatcher::expectShutter(uint32_t frameNumber)
+void ShutterDispatcher::expectShutter(uint32_t frameNumber, bool isReprocess)
 {
     std::lock_guard<std::mutex> lock(mLock);
-    mShutters.emplace(frameNumber, Shutter());
+
+    if (isReprocess) {
+        mReprocessShutters.emplace(frameNumber, Shutter());
+    } else {
+        mShutters.emplace(frameNumber, Shutter());
+    }
 }
 
 void ShutterDispatcher::markShutterReady(uint32_t frameNumber, uint64_t timestamp)
 {
     std::lock_guard<std::mutex> lock(mLock);
 
-    // Make this frame's shutter ready.
+    std::map<uint32_t, Shutter> *shutters = nullptr;
+
+    // Find the shutter entry.
     auto shutter = mShutters.find(frameNumber);
     if (shutter == mShutters.end()) {
-        // Shutter was already sent.
-        return;
+        shutter = mReprocessShutters.find(frameNumber);
+        if (shutter == mReprocessShutters.end()) {
+            // Shutter was already sent.
+            return;
+        }
+        shutters = &mReprocessShutters;
+    } else {
+        shutters = &mShutters;
     }
 
+    // Make this frame's shutter ready.
     shutter->second.ready = true;
     shutter->second.timestamp = timestamp;
 
     // Iterate throught the shutters and send out shuters until the one that's not ready yet.
-    shutter = mShutters.begin();
-    while (shutter != mShutters.end()) {
+    shutter = shutters->begin();
+    while (shutter != shutters->end()) {
         if (!shutter->second.ready) {
             // If this shutter is not ready, the following shutters can't be sent.
             break;
@@ -14912,7 +14896,7 @@ void ShutterDispatcher::markShutterReady(uint32_t frameNumber, uint64_t timestam
         msg.message.shutter.timestamp = shutter->second.timestamp;
         mParent->orchestrateNotify(&msg);
 
-        shutter = mShutters.erase(shutter);
+        shutter = shutters->erase(shutter);
     }
 }
 
@@ -14920,6 +14904,7 @@ void ShutterDispatcher::clear(uint32_t frameNumber)
 {
     std::lock_guard<std::mutex> lock(mLock);
     mShutters.erase(frameNumber);
+    mReprocessShutters.erase(frameNumber);
 }
 
 void ShutterDispatcher::clear()
@@ -14932,7 +14917,16 @@ void ShutterDispatcher::clear()
             __FUNCTION__, shutter.first, shutter.second.ready,
             shutter.second.timestamp);
     }
+
+    // Log errors for stale reprocess shutters.
+    for (auto &shutter : mReprocessShutters) {
+        ALOGE("%s: stale reprocess shutter: frame number %u, ready %d, timestamp %" PRId64,
+            __FUNCTION__, shutter.first, shutter.second.ready,
+            shutter.second.timestamp);
+    }
+
     mShutters.clear();
+    mReprocessShutters.clear();
 }
 
 OutputBufferDispatcher::OutputBufferDispatcher(QCamera3HardwareInterface *parent) :
