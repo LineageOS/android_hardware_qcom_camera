@@ -438,6 +438,11 @@ private:
     // metadata callbacks are invoked in the order of frame number.
     void handlePendingResultMetadataWithLock(uint32_t frameNumber,
             const camera_metadata_t *resultMetadata);
+    // Going through pending request list and send out result metadata for requests
+    // that are ready.
+    // frameNumber is the lastest frame whose result metadata is ready.
+    // isLiveRequest is whether the frame belongs to a live request.
+    void dispatchResultMetadataWithLock(uint32_t frameNumber, bool isLiveRequest);
     void handleDepthDataLocked(const cam_depth_data_t &depthData,
             uint32_t frameNumber);
     void notifyErrorFoPendingDepthData(QCamera3DepthChannel *depthCh);
@@ -805,6 +810,7 @@ private:
     void onCaptureResult(pbcamera::CaptureResult *result,
             const camera_metadata_t &resultMetadata) override;
     void onFailedCaptureResult(pbcamera::CaptureResult *failedResult) override;
+    void onShutter(uint32_t requestId, int64_t apSensorTimestampNs) override;
 
     // Map from frame number to frame. Must be protected by mHdrPlusPendingRequestsLock.
     std::map<uint32_t, HdrPlusPendingRequest> mHdrPlusPendingRequests;
