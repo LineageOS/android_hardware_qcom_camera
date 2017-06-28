@@ -526,6 +526,7 @@ private:
     QCamera3HdrPlusRawSrcChannel *mHdrPlusRawSrcChannel;
     QCamera3RegularChannel *mDummyBatchChannel;
     QCamera3DepthChannel *mDepthChannel;
+    cam_sensor_pd_data_t mDepthCloudMode; //Cache last configured mode
     QCameraPerfLockMgr mPerfLockMgr;
 
     uint32_t mChannelHandle;
@@ -802,6 +803,9 @@ private:
     // Update HDR+ result metadata with the still capture's request settings.
     void updateHdrPlusResultMetadata(CameraMetadata &resultMetadata,
             std::shared_ptr<metadata_buffer_t> settings);
+
+    // Wait until opening HDR+ client completes if it's being opened.
+    void finishHdrPlusClientOpeningLocked(std::unique_lock<std::mutex> &lock);
 
     // HDR+ client callbacks.
     void onOpened(std::unique_ptr<HdrPlusClient> client) override;
