@@ -32,10 +32,11 @@
 
 // System dependencies
 #include <CameraMetadata.h>
+#include <map>
+#include <mutex>
 #include <pthread.h>
 #include <utils/KeyedVector.h>
 #include <utils/List.h>
-#include <map>
 // Camera dependencies
 #include "hardware/camera3.h"
 #include "QCamera3Channel.h"
@@ -790,6 +791,9 @@ private:
 
     // Disable HDR+ mode. Easel will stop capturing ZSL buffers.
     void disableHdrPlusModeLocked();
+
+    // Return if current session with configured streams is compatible with HDR+ mode.
+    bool isSessionHdrPlusModeCompatible();
 
     // Configure streams for HDR+.
     status_t configureHdrPlusStreamsLocked();
