@@ -58,7 +58,6 @@
 #include "QCameraTrace.h"
 
 #include "HdrPlusClientUtils.h"
-#include "EaselManagerClient.h"
 
 extern "C" {
 #include "mm_camera_dbg.h"
@@ -98,7 +97,7 @@ namespace qcamera {
 #define REGIONS_TUPLE_COUNT    5
 #define HDR_PLUS_PERF_TIME_OUT  (7000) // milliseconds
 // Set a threshold for detection of missing buffers //seconds
-#define MISSING_REQUEST_BUF_TIMEOUT 3
+#define MISSING_REQUEST_BUF_TIMEOUT 10
 #define MISSING_HDRPLUS_REQUEST_BUF_TIMEOUT 30
 #define FLUSH_TIMEOUT 3
 #define METADATA_MAP_SIZE(MAP) (sizeof(MAP)/sizeof(MAP[0]))
@@ -681,7 +680,7 @@ QCamera3HardwareInterface::~QCamera3HardwareInterface()
     }
     if (mChannelHandle) {
         mCameraHandle->ops->stop_channel(mCameraHandle->camera_handle,
-                mChannelHandle);
+                mChannelHandle, /*stop_immediately*/false);
         LOGD("stopping channel %d", mChannelHandle);
     }
 
@@ -876,7 +875,7 @@ int QCamera3HardwareInterface::openCamera(struct hw_device_t **hw_device)
         std::unique_lock<std::mutex> l(gHdrPlusClientLock);
         if (gEaselManagerClient != nullptr && gEaselManagerClient->isEaselPresentOnDevice()) {
             logEaselEvent("EASEL_STARTUP_LATENCY", "Resume");
-            rc = gEaselManagerClient->resume();
+            rc = gEaselManagerClient->resume(this);
             if (rc != 0) {
                 ALOGE("%s: Resuming Easel failed: %s (%d)", __FUNCTION__, strerror(-rc), rc);
                 return rc;
@@ -1814,7 +1813,7 @@ int QCamera3HardwareInterface::configureStreamsPerfLocked(
     }
     if (mChannelHandle) {
         mCameraHandle->ops->stop_channel(mCameraHandle->camera_handle,
-                mChannelHandle);
+                mChannelHandle, /*stop_immediately*/false);
         LOGD("stopping channel %d", mChannelHandle);
     }
 
@@ -6151,13 +6150,15 @@ void QCamera3HardwareInterface::dump(int fd)
  *
  * PARAMETERS :
  *  @ restartChannels: re-start all channels
- *
+ *  @ stopChannelImmediately: stop the channel immediately. This should be used
+ *                            when device encountered an error and MIPI may has
+ *                            been stopped.
  *
  * RETURN     :
  *          0 on success
  *          Error code on failure
  *==========================================================================*/
-int QCamera3HardwareInterface::flush(bool restartChannels)
+int QCamera3HardwareInterface::flush(bool restartChannels, bool stopChannelImmediately)
 {
     KPI_ATRACE_CAMSCOPE_CALL(CAMSCOPE_HAL3_STOP_PREVIEW);
     int32_t rc = NO_ERROR;
@@ -6204,7 +6205,7 @@ int QCamera3HardwareInterface::flush(bool restartChannels)
     }
     if (mChannelHandle) {
         mCameraHandle->ops->stop_channel(mCameraHandle->camera_handle,
-                mChannelHandle);
+                mChannelHandle, stopChannelImmediately);
     }
 
     // Reset bundle info
@@ -6373,12 +6374,14 @@ int QCamera3HardwareInterface::flushPerf()
  * DESCRIPTION: This function calls internal flush and notifies the error to
  *              framework and updates the state variable.
  *
- * PARAMETERS : None
+ * PARAMETERS :
+ *   @stopChannelImmediately : stop channels immediately without waiting for
+ *                             frame boundary.
  *
  * RETURN     : NO_ERROR on Success
  *              Error code on failure
  *==========================================================================*/
-int32_t QCamera3HardwareInterface::handleCameraDeviceError()
+int32_t QCamera3HardwareInterface::handleCameraDeviceError(bool stopChannelImmediately)
 {
     int32_t rc = NO_ERROR;
 
@@ -6392,7 +6395,7 @@ int32_t QCamera3HardwareInterface::handleCameraDeviceError()
         }
         pthread_mutex_unlock(&mMutex);
 
-        rc = flush(false /* restart channels */);
+        rc = flush(false /* restart channels */, stopChannelImmediately);
         if (NO_ERROR != rc) {
             LOGE("internal flush to handle mState = ERROR failed");
         }
@@ -14708,6 +14711,17 @@ status_t QCamera3HardwareInterface::configureHdrPlusStreamsLocked()
     return OK;
 }
 
+void QCamera3HardwareInterface::onEaselFatalError(std::string errMsg)
+{
+    ALOGE("%s: Got an Easel fatal error: %s", __FUNCTION__, errMsg.c_str());
+    // Set HAL state to error.
+    pthread_mutex_lock(&mMutex);
+    mState = ERROR;
+    pthread_mutex_unlock(&mMutex);
+
+    handleCameraDeviceError(/*stopChannelImmediately*/true);
+}
+
 void QCamera3HardwareInterface::onOpened(std::unique_ptr<HdrPlusClient> client)
 {
     if (client == nullptr) {
@@ -14762,7 +14776,7 @@ void QCamera3HardwareInterface::onFatalError()
     mState = ERROR;
     pthread_mutex_unlock(&mMutex);
 
-    handleCameraDeviceError();
+    handleCameraDeviceError(/*stopChannelImmediately*/true);
 }
 
 void QCamera3HardwareInterface::onShutter(uint32_t requestId, int64_t apSensorTimestampNs)
