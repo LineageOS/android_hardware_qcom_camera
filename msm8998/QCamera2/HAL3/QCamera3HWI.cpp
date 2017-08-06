@@ -95,7 +95,6 @@ namespace qcamera {
 #define TEMPLATE_MAX_PREVIEW_FPS (30.0)
 #define MAX_HFR_BATCH_SIZE     (8)
 #define REGIONS_TUPLE_COUNT    5
-#define HDR_PLUS_PERF_TIME_OUT  (7000) // milliseconds
 // Set a threshold for detection of missing buffers //seconds
 #define MISSING_REQUEST_BUF_TIMEOUT 10
 #define MISSING_HDRPLUS_REQUEST_BUF_TIMEOUT 30
@@ -582,6 +581,9 @@ QCamera3HardwareInterface::QCamera3HardwareInterface(uint32_t cameraId,
     memset(prop, 0, sizeof(prop));
     property_get("persist.camera.cacmode.disable", prop, "0");
     m_cacModeDisabled = (uint8_t)atoi(prop);
+
+    m_bForceInfinityAf = property_get_bool("persist.camera.af.infinity", 0);
+    m_MobicatMask = property_get_bool("persist.camera.mobicat", 0);
 
     //Load and read GPU library.
     lib_surface_utils = NULL;
@@ -4027,7 +4029,8 @@ void QCamera3HardwareInterface::hdrPlusPerfLock(
         return;
     }
 
-    //acquire perf lock for 5 sec after the last HDR frame is captured
+    //acquire perf lock for 2 secs after the last HDR frame is captured
+    constexpr uint32_t HDR_PLUS_PERF_TIME_OUT = 2000;
     if ((p_frame_number_valid != NULL) && *p_frame_number_valid) {
         if ((p_frame_number != NULL) &&
                 (mLastCustIntentFrmNum == (int32_t)*p_frame_number)) {
@@ -7170,6 +7173,11 @@ QCamera3HardwareInterface::translateFromHalMetadata(
     IF_META_AVAILABLE(int64_t, sensorExpTime, CAM_INTF_META_SENSOR_EXPOSURE_TIME, metadata) {
         LOGD("sensorExpTime = %lld", *sensorExpTime);
         camMetadata.update(ANDROID_SENSOR_EXPOSURE_TIME , sensorExpTime, 1);
+    }
+
+    IF_META_AVAILABLE(float, expTimeBoost, CAM_INTF_META_EXP_TIME_BOOST, metadata) {
+        LOGD("expTimeBoost = %f", *expTimeBoost);
+        camMetadata.update(NEXUS_EXPERIMENTAL_2017_EXP_TIME_BOOST, expTimeBoost, 1);
     }
 
     IF_META_AVAILABLE(int64_t, sensorFameDuration,
@@ -12090,11 +12098,8 @@ int QCamera3HardwareInterface::translateFwkMetadataToHalMetadata(
         }
     }
 
-    char af_value[PROPERTY_VALUE_MAX];
-    property_get("persist.camera.af.infinity", af_value, "0");
-
     uint8_t fwk_focusMode = 0;
-    if (atoi(af_value) == 0) {
+    if (m_bForceInfinityAf == 0) {
         if (frame_settings.exists(ANDROID_CONTROL_AF_MODE)) {
             fwk_focusMode = frame_settings.find(ANDROID_CONTROL_AF_MODE).data.u8[0];
             int val = lookupHalName(FOCUS_MODES_MAP, METADATA_MAP_SIZE(FOCUS_MODES_MAP),
@@ -13700,12 +13705,9 @@ uint8_t QCamera3HardwareInterface::getMobicatMask()
  *==========================================================================*/
 int32_t QCamera3HardwareInterface::setMobicat()
 {
-    char value [PROPERTY_VALUE_MAX];
-    property_get("persist.camera.mobicat", value, "0");
     int32_t ret = NO_ERROR;
-    uint8_t enableMobi = (uint8_t)atoi(value);
 
-    if (enableMobi) {
+    if (m_MobicatMask) {
         tune_cmd_t tune_cmd;
         tune_cmd.type = SET_RELOAD_CHROMATIX;
         tune_cmd.module = MODULE_ALL;
@@ -13718,7 +13720,6 @@ int32_t QCamera3HardwareInterface::setMobicat()
                 CAM_INTF_PARM_SET_PP_COMMAND,
                 tune_cmd);
     }
-    m_MobicatMask = enableMobi;
 
     return ret;
 }
