@@ -506,6 +506,9 @@ private:
             T output[BLACK_LEVEL_PATTERN_CNT],
             cam_color_filter_arrangement_t color_arrangement);
 
+    int32_t startChannelLocked();
+    void stopChannelLocked(bool stopChannelImmediately);
+
     camera3_device_t   mCameraDevice;
     uint32_t           mCameraId;
     mm_camera_vtbl_t  *mCameraHandle;
@@ -701,6 +704,7 @@ private:
     int32_t mLastCustIntentFrmNum;
     // Easel firmware version
     char mEaselFwVersion[FW_VER_SIZE];
+    bool mEaselFwUpdated;
     static const QCameraMap<camera_metadata_enum_android_control_effect_mode_t,
             cam_effect_mode_type> EFFECT_MODES_MAP[];
     static const QCameraMap<camera_metadata_enum_android_control_awb_mode_t,
@@ -854,6 +858,9 @@ private:
 
     // If ZSL is enabled (android.control.enableZsl).
     bool mZslEnabled;
+
+    // If Easel MIPI has been started.
+    bool mEaselMipiStarted;
 
     // If HAL provides RAW input buffers to Easel. This is just for prototyping.
     bool mIsApInputUsedForHdrPlus;
