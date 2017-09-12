@@ -523,10 +523,12 @@ QCamera3HardwareInterface::QCamera3HardwareInterface(uint32_t cameraId,
       m_pDualCamCmdPtr(NULL),
       mHdrPlusModeEnabled(false),
       mZslEnabled(false),
+      mEaselMipiStarted(false),
       mIsApInputUsedForHdrPlus(false),
       mFirstPreviewIntentSeen(false),
       m_bSensorHDREnabled(false),
-      mAfTrigger()
+      mAfTrigger(),
+      mSceneDistance(-1)
 {
     getLogLevel();
     mCommon.init(gCamCapability[cameraId]);
@@ -569,6 +571,7 @@ QCamera3HardwareInterface::QCamera3HardwareInterface(uint32_t cameraId,
     memset(mLdafCalib, 0, sizeof(mLdafCalib));
 
     memset(mEaselFwVersion, 0, sizeof(mEaselFwVersion));
+    mEaselFwUpdated = false;
 
     memset(prop, 0, sizeof(prop));
     property_get("persist.camera.tnr.preview", prop, "0");
@@ -634,6 +637,19 @@ QCamera3HardwareInterface::~QCamera3HardwareInterface()
     mPerfLockMgr.releasePerfLock(PERF_LOCK_POWERHINT_ENCODE);
     mPerfLockMgr.acquirePerfLock(PERF_LOCK_CLOSE_CAMERA);
 
+    // Close HDR+ client first before destroying HAL.
+    {
+        std::unique_lock<std::mutex> l(gHdrPlusClientLock);
+        finishHdrPlusClientOpeningLocked(l);
+        if (gHdrPlusClient != nullptr) {
+            // Disable HDR+ mode.
+            disableHdrPlusModeLocked();
+            // Disconnect Easel if it's connected.
+            gEaselManagerClient->closeHdrPlusClient(std::move(gHdrPlusClient));
+            gHdrPlusClient = nullptr;
+        }
+    }
+
     // unlink of dualcam during close camera
     if (mIsDeviceLinked) {
         cam_dual_camera_bundle_info_t *m_pRelCamSyncBuf =
@@ -692,9 +708,7 @@ QCamera3HardwareInterface::~QCamera3HardwareInterface()
         mMetadataChannel->stop();
     }
     if (mChannelHandle) {
-        mCameraHandle->ops->stop_channel(mCameraHandle->camera_handle,
-                mChannelHandle, /*stop_immediately*/false);
-        LOGD("stopping channel %d", mChannelHandle);
+        stopChannelLocked(/*stop_immediately*/false);
     }
 
     for (List<stream_info_t *>::iterator it = mStreamInfo.begin();
@@ -900,6 +914,7 @@ int QCamera3HardwareInterface::openCamera(struct hw_device_t **hw_device)
                 ALOGE("%s: Resuming Easel failed: %s (%d)", __FUNCTION__, strerror(-rc), rc);
                 return rc;
             }
+            mEaselFwUpdated = false;
         }
     }
 
@@ -1108,21 +1123,7 @@ int QCamera3HardwareInterface::closeCamera()
 
     {
         std::unique_lock<std::mutex> l(gHdrPlusClientLock);
-        finishHdrPlusClientOpeningLocked(l);
-        if (gHdrPlusClient != nullptr) {
-            // Disable HDR+ mode.
-            disableHdrPlusModeLocked();
-            // Disconnect Easel if it's connected.
-            gEaselManagerClient->closeHdrPlusClient(std::move(gHdrPlusClient));
-            gHdrPlusClient = nullptr;
-        }
-
         if (EaselManagerClientOpened) {
-            rc = gEaselManagerClient->stopMipi(mCameraId);
-            if (rc != 0) {
-                ALOGE("%s: Stopping MIPI failed: %s (%d)", __FUNCTION__, strerror(-rc), rc);
-            }
-
             rc = gEaselManagerClient->suspend();
             if (rc != 0) {
                 ALOGE("%s: Suspending Easel failed: %s (%d)", __FUNCTION__, strerror(-rc), rc);
@@ -1808,6 +1809,13 @@ int QCamera3HardwareInterface::configureStreamsPerfLocked(
         return rc;
     }
 
+    // Disable HRD+ if it's enabled;
+    {
+        std::unique_lock<std::mutex> l(gHdrPlusClientLock);
+        finishHdrPlusClientOpeningLocked(l);
+        disableHdrPlusModeLocked();
+    }
+
     /* first invalidate all the steams in the mStreamList
      * if they appear again, they will be validated */
     for (List<stream_info_t*>::iterator it = mStreamInfo.begin();
@@ -1842,9 +1850,7 @@ int QCamera3HardwareInterface::configureStreamsPerfLocked(
         mMetadataChannel->stop();
     }
     if (mChannelHandle) {
-        mCameraHandle->ops->stop_channel(mCameraHandle->camera_handle,
-                mChannelHandle, /*stop_immediately*/false);
-        LOGD("stopping channel %d", mChannelHandle);
+        stopChannelLocked(/*stop_immediately*/false);
     }
 
     pthread_mutex_lock(&mMutex);
@@ -3062,13 +3068,6 @@ int QCamera3HardwareInterface::configureStreamsPerfLocked(
     deriveMinFrameDuration();
 
     mFirstPreviewIntentSeen = false;
-
-    // Disable HRD+ if it's enabled;
-    {
-        std::unique_lock<std::mutex> l(gHdrPlusClientLock);
-        finishHdrPlusClientOpeningLocked(l);
-        disableHdrPlusModeLocked();
-    }
 
     // Update state
     mState = CONFIGURED;
@@ -6075,42 +6074,9 @@ no_error:
                 }
 
                 // Configure modules for stream on.
-                rc = mCameraHandle->ops->start_channel(mCameraHandle->camera_handle,
-                        mChannelHandle, /*start_sensor_streaming*/false);
+                rc = startChannelLocked();
                 if (rc != NO_ERROR) {
-                    LOGE("start_channel failed %d", rc);
-                    pthread_mutex_unlock(&mMutex);
-                    return rc;
-                }
-
-                {
-                    // Configure Easel for stream on.
-                    std::unique_lock<std::mutex> l(gHdrPlusClientLock);
-
-                    // Now that sensor mode should have been selected, get the selected sensor mode
-                    // info.
-                    memset(&mSensorModeInfo, 0, sizeof(mSensorModeInfo));
-                    getCurrentSensorModeInfo(mSensorModeInfo);
-
-                    if (EaselManagerClientOpened) {
-                        logEaselEvent("EASEL_STARTUP_LATENCY", "Starting MIPI");
-                        rc = gEaselManagerClient->startMipi(mCameraId, mSensorModeInfo.op_pixel_clk,
-                                /*enableCapture*/true);
-                        if (rc != OK) {
-                            ALOGE("%s: Failed to start MIPI rate for camera %u to %u", __FUNCTION__,
-                                    mCameraId, mSensorModeInfo.op_pixel_clk);
-                            pthread_mutex_unlock(&mMutex);
-                            return rc;
-                        }
-                        logEaselEvent("EASEL_STARTUP_LATENCY", "Starting MIPI done");
-                    }
-                }
-
-                // Start sensor streaming.
-                rc = mCameraHandle->ops->start_sensor_streaming(mCameraHandle->camera_handle,
-                        mChannelHandle);
-                if (rc != NO_ERROR) {
-                    LOGE("start_sensor_stream_on failed %d", rc);
+                    LOGE("startChannelLocked failed %d", rc);
                     pthread_mutex_unlock(&mMutex);
                     return rc;
                 }
@@ -6190,6 +6156,67 @@ no_error:
     pthread_mutex_unlock(&mMutex);
 
     return rc;
+}
+
+int32_t QCamera3HardwareInterface::startChannelLocked()
+{
+    // Configure modules for stream on.
+    int32_t rc = mCameraHandle->ops->start_channel(mCameraHandle->camera_handle,
+            mChannelHandle, /*start_sensor_streaming*/false);
+    if (rc != NO_ERROR) {
+        LOGE("start_channel failed %d", rc);
+        return rc;
+    }
+
+    {
+        // Configure Easel for stream on.
+        std::unique_lock<std::mutex> l(gHdrPlusClientLock);
+
+        // Now that sensor mode should have been selected, get the selected sensor mode
+        // info.
+        memset(&mSensorModeInfo, 0, sizeof(mSensorModeInfo));
+        getCurrentSensorModeInfo(mSensorModeInfo);
+
+        if (EaselManagerClientOpened) {
+            logEaselEvent("EASEL_STARTUP_LATENCY", "Starting MIPI");
+            rc = gEaselManagerClient->startMipi(mCameraId, mSensorModeInfo.op_pixel_clk,
+                    /*enableCapture*/true);
+            if (rc != OK) {
+                ALOGE("%s: Failed to start MIPI rate for camera %u to %u", __FUNCTION__,
+                        mCameraId, mSensorModeInfo.op_pixel_clk);
+                return rc;
+            }
+            logEaselEvent("EASEL_STARTUP_LATENCY", "Starting MIPI done");
+            mEaselMipiStarted = true;
+        }
+    }
+
+    // Start sensor streaming.
+    rc = mCameraHandle->ops->start_sensor_streaming(mCameraHandle->camera_handle,
+            mChannelHandle);
+    if (rc != NO_ERROR) {
+        LOGE("start_sensor_stream_on failed %d", rc);
+        return rc;
+    }
+
+    return 0;
+}
+
+void QCamera3HardwareInterface::stopChannelLocked(bool stopChannelImmediately)
+{
+    mCameraHandle->ops->stop_channel(mCameraHandle->camera_handle,
+            mChannelHandle, stopChannelImmediately);
+
+    {
+        std::unique_lock<std::mutex> l(gHdrPlusClientLock);
+        if (EaselManagerClientOpened && mEaselMipiStarted) {
+            int32_t rc = gEaselManagerClient->stopMipi(mCameraId);
+            if (rc != 0) {
+                ALOGE("%s: Stopping MIPI failed: %s (%d)", __FUNCTION__, strerror(-rc), rc);
+            }
+            mEaselMipiStarted = false;
+        }
+    }
 }
 
 /*===========================================================================
@@ -6314,8 +6341,7 @@ int QCamera3HardwareInterface::flush(bool restartChannels, bool stopChannelImmed
         return rc;
     }
     if (mChannelHandle) {
-        mCameraHandle->ops->stop_channel(mCameraHandle->camera_handle,
-                mChannelHandle, stopChannelImmediately);
+        stopChannelLocked(stopChannelImmediately);
     }
 
     // Reset bundle info
@@ -6350,10 +6376,10 @@ int QCamera3HardwareInterface::flush(bool restartChannels, bool stopChannelImmed
             return rc;
         }
         if (mChannelHandle) {
-            mCameraHandle->ops->start_channel(mCameraHandle->camera_handle,
-                        mChannelHandle, /*start_sensor_streaming*/true);
+            // Configure modules for stream on.
+            rc = startChannelLocked();
             if (rc < 0) {
-                LOGE("start_channel failed");
+                LOGE("startChannelLocked failed");
                 pthread_mutex_unlock(&mMutex);
                 return rc;
             }
@@ -6760,12 +6786,12 @@ QCamera3HardwareInterface::translateFromHalMetadata(
             camMetadata.update(DEVCAMDEBUG_AF_LENS_POSITION, &fwk_DevCamDebug_af_lens_position, 1);
         }
         IF_META_AVAILABLE(int32_t, DevCamDebug_af_tof_confidence,
-                CAM_INTF_META_DEV_CAM_AF_TOF_CONFIDENCE, metadata) {
+                CAM_INTF_META_AF_TOF_CONFIDENCE, metadata) {
             int32_t fwk_DevCamDebug_af_tof_confidence = *DevCamDebug_af_tof_confidence;
             camMetadata.update(DEVCAMDEBUG_AF_TOF_CONFIDENCE, &fwk_DevCamDebug_af_tof_confidence, 1);
         }
         IF_META_AVAILABLE(int32_t, DevCamDebug_af_tof_distance,
-                CAM_INTF_META_DEV_CAM_AF_TOF_DISTANCE, metadata) {
+                CAM_INTF_META_AF_TOF_DISTANCE, metadata) {
             int32_t fwk_DevCamDebug_af_tof_distance = *DevCamDebug_af_tof_distance;
             camMetadata.update(DEVCAMDEBUG_AF_TOF_DISTANCE, &fwk_DevCamDebug_af_tof_distance, 1);
         }
@@ -8469,6 +8495,24 @@ QCamera3HardwareInterface::translateCbUrgentMetadataToResultMetadata
             }
         }
     }
+
+    IF_META_AVAILABLE(int32_t, af_tof_confidence,
+            CAM_INTF_META_AF_TOF_CONFIDENCE, metadata) {
+        IF_META_AVAILABLE(int32_t, af_tof_distance,
+                CAM_INTF_META_AF_TOF_DISTANCE, metadata) {
+            int32_t fwk_af_tof_confidence = *af_tof_confidence;
+            int32_t fwk_af_tof_distance = *af_tof_distance;
+            if (fwk_af_tof_confidence == 1) {
+                mSceneDistance = fwk_af_tof_distance;
+            } else {
+                mSceneDistance = -1;
+            }
+            LOGD("tof_distance %d, tof_confidence %d, mSceneDistance %d",
+                     fwk_af_tof_distance, fwk_af_tof_confidence, mSceneDistance);
+        }
+    }
+    camMetadata.update(NEXUS_EXPERIMENTAL_2017_SCENE_DISTANCE, &mSceneDistance, 1);
+
     resultMetadata = camMetadata.release();
     return resultMetadata;
 }
@@ -10381,6 +10425,7 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
        NEXUS_EXPERIMENTAL_2017_HISTOGRAM,
        NEXUS_EXPERIMENTAL_2017_AF_REGIONS_CONFIDENCE,
        NEXUS_EXPERIMENTAL_2017_EXP_TIME_BOOST,
+       NEXUS_EXPERIMENTAL_2017_SCENE_DISTANCE,
        };
 
     size_t result_keys_cnt =
@@ -14094,22 +14139,15 @@ const uint32_t *QCamera3HardwareInterface::getLdafCalib()
 * PARAMETERS : None
 *
 * RETURN     : string describing Firmware version
-*              "\0" if Easel manager client is not open
+*              "\0" if version is not up to date
 *==========================================================================*/
 const char *QCamera3HardwareInterface::getEaselFwVersion()
 {
-    int rc = NO_ERROR;
-
-    std::unique_lock<std::mutex> l(gHdrPlusClientLock);
-    ALOGD("%s: Querying Easel firmware version", __FUNCTION__);
-    if (EaselManagerClientOpened) {
-        rc = gEaselManagerClient->getFwVersion(mEaselFwVersion);
-        if (rc != OK)
-            ALOGD("%s: Failed to query Easel firmware version", __FUNCTION__);
-        else
-            return (const char *)&mEaselFwVersion[0];
+    if (mEaselFwUpdated) {
+        return (const char *)&mEaselFwVersion[0];
+    } else {
+        return NULL;
     }
-    return NULL;
 }
 
 /*===========================================================================
@@ -15203,6 +15241,8 @@ void QCamera3HardwareInterface::onEaselFatalError(std::string errMsg)
 
 void QCamera3HardwareInterface::onOpened(std::unique_ptr<HdrPlusClient> client)
 {
+    int rc = NO_ERROR;
+
     if (client == nullptr) {
         ALOGE("%s: Opened client is null.", __FUNCTION__);
         return;
@@ -15235,6 +15275,16 @@ void QCamera3HardwareInterface::onOpened(std::unique_ptr<HdrPlusClient> client)
     res = enableHdrPlusModeLocked();
     if (res != OK) {
         LOGE("%s: Failed to configure HDR+ streams.", __FUNCTION__);
+    }
+
+    // Get Easel firmware version
+    if (EaselManagerClientOpened) {
+        rc = gEaselManagerClient->getFwVersion(mEaselFwVersion);
+        if (rc != OK) {
+            ALOGD("%s: Failed to query Easel firmware version", __FUNCTION__);
+        } else {
+            mEaselFwUpdated = true;
+        }
     }
 }
 
