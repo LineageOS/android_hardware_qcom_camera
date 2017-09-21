@@ -45,10 +45,13 @@
 #define BHIST_STATS_DEBUG_DATA_SIZE       (70000)
 #define TUNING_INFO_DEBUG_DATA_SIZE       (4)
 #define OIS_DATA_MAX_SIZE                 (32)
-#define MAX_OIS_SAMPLE_NUM_PER_FRAME      (10)
+#define MAX_OIS_SAMPLE_NUM_PER_FRAME      (20)
 #define MAX_MAKERNOTE_LENGTH              (65535)
 
 #define PD_DATA_SIZE                      (4032*2*758)
+
+#define MAX_PDAF_CALIB_GAINS              (25*19)
+#define MAX_PDAF_CALIB_COEFF              (200)
 
 #define CEILING64(X) (((X) + 0x0003F) & 0xFFFFFFC0)
 #define CEILING32(X) (((X) + 0x0001F) & 0xFFFFFFE0)
@@ -616,7 +619,14 @@ typedef struct {
     uint32_t op_pixel_clk;             // Sensor output rate.
     uint32_t num_raw_bits;             // Number of bits for RAW. 0 if not RAW.
     int64_t  timestamp_offset;         // Timestamp offset with gyro sensor. 0 if uncalibrated.
+    int64_t  timestamp_crop_offset;    // Timestamp offset due to crop on top of active array.
 } cam_sensor_mode_info_t;
+
+typedef struct {
+    uint16_t left_gain_map[MAX_PDAF_CALIB_GAINS];
+    uint16_t right_gain_map[MAX_PDAF_CALIB_GAINS];
+    int16_t conversion_coeff[MAX_PDAF_CALIB_COEFF];
+} cam_pd_calibration_t;
 
 typedef struct {
     cam_frame_len_offset_t plane_info;

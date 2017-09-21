@@ -1809,7 +1809,7 @@ int QCamera3HardwareInterface::configureStreamsPerfLocked(
         return rc;
     }
 
-    // Disable HRD+ if it's enabled;
+    // Disable HDR+ if it's enabled;
     {
         std::unique_lock<std::mutex> l(gHdrPlusClientLock);
         finishHdrPlusClientOpeningLocked(l);
@@ -6084,14 +6084,16 @@ no_error:
         }
     }
 
-    // Enable HDR+ mode for the first PREVIEW_INTENT request.
+    // Enable HDR+ mode for the first PREVIEW_INTENT request that doesn't disable HDR+.
     {
         std::unique_lock<std::mutex> l(gHdrPlusClientLock);
         if (gEaselManagerClient != nullptr && gEaselManagerClient->isEaselPresentOnDevice() &&
                 !gEaselBypassOnly && !mFirstPreviewIntentSeen &&
                 meta.exists(ANDROID_CONTROL_CAPTURE_INTENT) &&
                 meta.find(ANDROID_CONTROL_CAPTURE_INTENT).data.u8[0] ==
-                ANDROID_CONTROL_CAPTURE_INTENT_PREVIEW) {
+                ANDROID_CONTROL_CAPTURE_INTENT_PREVIEW &&
+                meta.exists(NEXUS_EXPERIMENTAL_2017_DISABLE_HDRPLUS) &&
+                meta.find(NEXUS_EXPERIMENTAL_2017_DISABLE_HDRPLUS).data.i32[0] == 0) {
 
             if (isSessionHdrPlusModeCompatible()) {
                 rc = enableHdrPlusModeLocked();
@@ -6304,6 +6306,13 @@ int QCamera3HardwareInterface::flush(bool restartChannels, bool stopChannelImmed
     pthread_mutex_lock(&mMutex);
     mFlush = true;
     pthread_mutex_unlock(&mMutex);
+
+    // Disable HDR+ if it's enabled;
+    {
+        std::unique_lock<std::mutex> l(gHdrPlusClientLock);
+        finishHdrPlusClientOpeningLocked(l);
+        disableHdrPlusModeLocked();
+    }
 
     rc = stopAllChannels();
     // unlink of dualcam
@@ -9561,6 +9570,18 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
         int32_t pd_dimensions [] = {depthWidth, depthHeight, depthStride};
         staticInfo.update(NEXUS_EXPERIMENTAL_2017_PD_DATA_DIMENSIONS,
                 pd_dimensions, sizeof(pd_dimensions) / sizeof(pd_dimensions[0]));
+
+        staticInfo.update(NEXUS_EXPERIMENTAL_2017_EEPROM_PDAF_CALIB_RIGHT_GAINS,
+                reinterpret_cast<uint8_t *>(gCamCapability[cameraId]->pdaf_cal.right_gain_map),
+                sizeof(gCamCapability[cameraId]->pdaf_cal.right_gain_map));
+
+        staticInfo.update(NEXUS_EXPERIMENTAL_2017_EEPROM_PDAF_CALIB_LEFT_GAINS,
+                reinterpret_cast<uint8_t *>(gCamCapability[cameraId]->pdaf_cal.left_gain_map),
+                sizeof(gCamCapability[cameraId]->pdaf_cal.left_gain_map));
+
+        staticInfo.update(NEXUS_EXPERIMENTAL_2017_EEPROM_PDAF_CALIB_CONV_COEFF,
+                reinterpret_cast<uint8_t *>(gCamCapability[cameraId]->pdaf_cal.conversion_coeff),
+                sizeof(gCamCapability[cameraId]->pdaf_cal.conversion_coeff));
     }
 
     int32_t scalar_formats[] = {
@@ -10449,7 +10470,7 @@ int QCamera3HardwareInterface::initStaticMetadata(uint32_t cameraId)
         available_result_keys.add(ANDROID_STATISTICS_FACE_LANDMARKS);
     }
 #ifndef USE_HAL_3_3
-    if (hasBlackRegions) {
+    {
         available_result_keys.add(ANDROID_SENSOR_DYNAMIC_BLACK_LEVEL);
         available_result_keys.add(ANDROID_SENSOR_DYNAMIC_WHITE_LEVEL);
     }
@@ -11049,7 +11070,7 @@ int QCamera3HardwareInterface::initHdrPlusClientLocked() {
             ALOGE("%s: Suspending Easel failed: %s (%d)", __FUNCTION__, strerror(-res), res);
         }
 
-        gEaselBypassOnly = !property_get_bool("persist.camera.hdrplus.enable", true);
+        gEaselBypassOnly = !property_get_bool("persist.camera.hdrplus.enable", false);
         gEaselProfilingEnabled = property_get_bool("persist.camera.hdrplus.profiling", false);
         gEnableMultipleHdrplusOutputs =
                 property_get_bool("persist.camera.hdrplus.multiple_outputs", false);
@@ -11605,8 +11626,10 @@ camera_metadata_t* QCamera3HardwareInterface::translateCapabilityToMetadata(int 
         settings.update(NEXUS_EXPERIMENTAL_2017_POSTVIEW, &postview, 1);
         int32_t continuousZslCapture = 0;
         settings.update(NEXUS_EXPERIMENTAL_2017_CONTINUOUS_ZSL_CAPTURE, &continuousZslCapture, 1);
-        // Disable HDR+ for templates other than CAMERA3_TEMPLATE_STILL_CAPTURE.
-        int32_t disableHdrplus = (type == CAMERA3_TEMPLATE_STILL_CAPTURE) ? 0 : 1;
+        // Disable HDR+ for templates other than CAMERA3_TEMPLATE_STILL_CAPTURE and
+        // CAMERA3_TEMPLATE_PREVIEW.
+        int32_t disableHdrplus = (type == CAMERA3_TEMPLATE_STILL_CAPTURE ||
+                                  type == CAMERA3_TEMPLATE_PREVIEW) ? 0 : 1;
         settings.update(NEXUS_EXPERIMENTAL_2017_DISABLE_HDRPLUS, &disableHdrplus, 1);
 
         // Set hybrid_ae tag in PREVIEW and STILL_CAPTURE templates to 1 so that
@@ -14892,19 +14915,6 @@ bool QCamera3HardwareInterface::isRequestHdrPlusCompatible(
         return false;
     }
 
-    // TODO (b/36492953): support digital zoom.
-    if (!metadata.exists(ANDROID_SCALER_CROP_REGION) ||
-         metadata.find(ANDROID_SCALER_CROP_REGION).data.i32[0] != 0 ||
-         metadata.find(ANDROID_SCALER_CROP_REGION).data.i32[1] != 0 ||
-         metadata.find(ANDROID_SCALER_CROP_REGION).data.i32[2] !=
-                gCamCapability[mCameraId]->active_array_size.width ||
-         metadata.find(ANDROID_SCALER_CROP_REGION).data.i32[3] !=
-                gCamCapability[mCameraId]->active_array_size.height) {
-        ALOGV("%s: ANDROID_SCALER_CROP_REGION is not the same as active array region.",
-                __FUNCTION__);
-        return false;
-    }
-
     if (!metadata.exists(ANDROID_TONEMAP_MODE) ||
          metadata.find(ANDROID_TONEMAP_MODE).data.u8[0] != ANDROID_TONEMAP_MODE_HIGH_QUALITY) {
         ALOGV("%s: ANDROID_TONEMAP_MODE is not HQ.", __FUNCTION__);
@@ -15183,6 +15193,8 @@ status_t QCamera3HardwareInterface::configureHdrPlusStreamsLocked()
     inputConfig.sensorMode.activeArrayHeight = mSensorModeInfo.active_array_size.height;
     inputConfig.sensorMode.outputPixelClkHz = mSensorModeInfo.op_pixel_clk;
     inputConfig.sensorMode.timestampOffsetNs = mSensorModeInfo.timestamp_offset;
+    inputConfig.sensorMode.timestampCropOffsetNs = mSensorModeInfo.timestamp_crop_offset;
+
     if (mSensorModeInfo.num_raw_bits != 10) {
         ALOGE("%s: Only RAW10 is supported but this sensor mode has %d raw bits.", __FUNCTION__,
                 mSensorModeInfo.num_raw_bits);
@@ -15228,15 +15240,31 @@ status_t QCamera3HardwareInterface::configureHdrPlusStreamsLocked()
     return OK;
 }
 
-void QCamera3HardwareInterface::onEaselFatalError(std::string errMsg)
+void QCamera3HardwareInterface::handleEaselFatalError()
 {
-    ALOGE("%s: Got an Easel fatal error: %s", __FUNCTION__, errMsg.c_str());
-    // Set HAL state to error.
     pthread_mutex_lock(&mMutex);
     mState = ERROR;
     pthread_mutex_unlock(&mMutex);
 
     handleCameraDeviceError(/*stopChannelImmediately*/true);
+}
+
+void QCamera3HardwareInterface::handleEaselFatalErrorAsync()
+{
+    if (mEaselErrorFuture.valid()) {
+        // The error future has been invoked.
+        return;
+    }
+
+    // Launch a future to handle the fatal error.
+    mEaselErrorFuture = std::async(std::launch::async,
+            &QCamera3HardwareInterface::handleEaselFatalError, this);
+}
+
+void QCamera3HardwareInterface::onEaselFatalError(std::string errMsg)
+{
+    ALOGE("%s: Got an Easel fatal error: %s", __FUNCTION__, errMsg.c_str());
+    handleEaselFatalErrorAsync();
 }
 
 void QCamera3HardwareInterface::onOpened(std::unique_ptr<HdrPlusClient> client)
@@ -15298,14 +15326,8 @@ void QCamera3HardwareInterface::onOpenFailed(status_t err)
 
 void QCamera3HardwareInterface::onFatalError()
 {
-    ALOGE("%s: HDR+ client has a fatal error.", __FUNCTION__);
-
-    // Set HAL state to error.
-    pthread_mutex_lock(&mMutex);
-    mState = ERROR;
-    pthread_mutex_unlock(&mMutex);
-
-    handleCameraDeviceError(/*stopChannelImmediately*/true);
+    ALOGE("%s: HDR+ client encountered a fatal error.", __FUNCTION__);
+    handleEaselFatalErrorAsync();
 }
 
 void QCamera3HardwareInterface::onShutter(uint32_t requestId, int64_t apSensorTimestampNs)
