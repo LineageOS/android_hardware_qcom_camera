@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "key": {
+        "uuid": "311d3abd_35047856",
+        "filename": "Android.mk",
+        "patchSetId": 1
+      },
+      "lineNbr": 3,
+      "author": {
+        "id": 11883
+      },
+      "writtenOn": "2018-08-10T06:54:41Z",
+      "side": 1,
+      "message": "This looks pretty useless, given the fact it\u0027s barried only for 8998 and I don\u0027t think wahoo will move it to device tree ( by us, not Google )",
+      "revId": "3546438cf7632af8cf6abb62f13505f8ab668244",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": true
+    }
+  ]
+}
