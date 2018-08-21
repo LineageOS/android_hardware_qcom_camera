@@ -16,6 +16,24 @@
       "revId": "3546438cf7632af8cf6abb62f13505f8ab668244",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
       "unresolved": true
+    },
+    {
+      "key": {
+        "uuid": "ae40071e_82c3174f",
+        "filename": "Android.mk",
+        "patchSetId": 1
+      },
+      "lineNbr": 3,
+      "author": {
+        "id": 4550
+      },
+      "writtenOn": "2018-08-21T18:47:17Z",
+      "side": 1,
+      "message": "I don\u0027t think it hurts to have it, it\u0027s a limitation of pathmap on non-qcom. QCOM_HARDWARE have this check in their pathmap but non-qcom don\u0027t.",
+      "parentUuid": "311d3abd_35047856",
+      "revId": "3546438cf7632af8cf6abb62f13505f8ab668244",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71",
+      "unresolved": true
     }
   ]
 }
