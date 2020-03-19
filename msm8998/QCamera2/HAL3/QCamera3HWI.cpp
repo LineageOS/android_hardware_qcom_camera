@@ -5861,7 +5861,6 @@ no_error:
     // Mark current timestamp for the new request
     bufsForCurRequest.timestamp = systemTime(CLOCK_MONOTONIC);
     bufsForCurRequest.av_timestamp = 0;
-    bufsForCurRequest.hdrplus = hdrPlusRequest;
 
     if (hdrPlusRequest) {
         // Save settings for this request.
@@ -15142,7 +15141,8 @@ int32_t QCamera3HardwareInterface::notifyErrorForPendingRequests()
     while (pendingRequest != mPendingRequestsList.end() ||
            pendingBuffer != mPendingBuffersMap.mPendingBuffersInRequest.end()) {
         if (pendingRequest == mPendingRequestsList.end() ||
-            pendingBuffer->frame_number < pendingRequest->frame_number) {
+                ((pendingBuffer != mPendingBuffersMap.mPendingBuffersInRequest.end()) &&
+                 (pendingBuffer->frame_number < pendingRequest->frame_number))) {
             // If metadata for this frame was sent, notify about a buffer error and returns buffers
             // with error.
             for (auto &info : pendingBuffer->mPendingBufferList) {
@@ -15166,7 +15166,8 @@ int32_t QCamera3HardwareInterface::notifyErrorForPendingRequests()
 
             pendingBuffer = mPendingBuffersMap.mPendingBuffersInRequest.erase(pendingBuffer);
         } else if (pendingBuffer == mPendingBuffersMap.mPendingBuffersInRequest.end() ||
-                   pendingBuffer->frame_number > pendingRequest->frame_number) {
+                   ((pendingRequest != mPendingRequestsList.end()) &&
+                   (pendingBuffer->frame_number > pendingRequest->frame_number))) {
             // If the buffers for this frame were sent already, notify about a result error.
             camera3_notify_msg_t notify_msg;
             memset(&notify_msg, 0, sizeof(camera3_notify_msg_t));
@@ -16439,10 +16440,29 @@ void QCamera3HardwareInterface::onCaptureResult(pbcamera::CaptureResult *result,
         }
 
         if (channel == mPictureChannel) {
+            android_errorWriteLog(0x534e4554, "150004253");
+            // Keep a copy of outputBufferDef until the final JPEG buffer is
+            // ready because the JPEG callback uses the mm_camera_buf_def_t
+            // struct. The metaBufDef is stored in a shared_ptr to make sure
+            // it's freed.
+            std::shared_ptr<mm_camera_buf_def_t> metaBufDef =
+                    std::make_shared<mm_camera_buf_def_t>();
+            {
+                pthread_mutex_lock(&mMutex);
+                for (auto& pendingBuffers : mPendingBuffersMap.mPendingBuffersInRequest) {
+                    if (pendingBuffers.frame_number == result->requestId) {
+                        pendingBuffers.mHdrplusInputBuf = outputBufferDef;
+                        pendingBuffers.mHdrplusInputMetaBuf = metaBufDef;
+                        break;
+                    }
+                }
+                pthread_mutex_unlock(&mMutex);
+            }
+
             // Return the buffer to pic channel for encoding.
             mPictureChannel->returnYuvBufferAndEncode(outputBufferDef.get(),
                     frameworkOutputBuffer->buffer, result->requestId,
-                    halMetadata);
+                    halMetadata, metaBufDef.get());
         } else {
             // Return the buffer to camera framework.
             pthread_mutex_lock(&mMutex);
