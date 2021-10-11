@@ -83,7 +83,7 @@ else
         LOCAL_CFLAGS += -DCAMERA_ION_FALLBACK_HEAP_ID=ION_CAMERA_HEAP_ID
         LOCAL_CFLAGS += -DNUM_RECORDING_BUFFERS=5
 endif
-LOCAL_CFLAGS += -Wall -Wextra -Werror
+LOCAL_CFLAGS += -Wall -Wextra -Werror -Wno-compound-token-split-by-macro
 
 LOCAL_SHARED_LIBRARIES:= \
          libcutils libdl liblog libmmcamera_interface
