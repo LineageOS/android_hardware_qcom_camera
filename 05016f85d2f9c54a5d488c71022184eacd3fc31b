@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": true,
+      "key": {
+        "uuid": "0fce95fd_6e8d55e9",
+        "filename": "msm8998/QCamera2/Android.mk",
+        "patchSetId": 1
+      },
+      "lineNbr": 140,
+      "author": {
+        "id": 13648
+      },
+      "writtenOn": "2022-06-20T22:29:07Z",
+      "side": 0,
+      "message": "You could simply remove this line and the following one (#141).",
+      "revId": "05016f85d2f9c54a5d488c71022184eacd3fc31b",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    }
+  ]
+}
