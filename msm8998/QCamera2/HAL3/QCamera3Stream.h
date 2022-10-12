@@ -176,7 +176,7 @@ private:
     int32_t handleBatchBuffer(mm_camera_super_buf_t *superBuf);
     int32_t bufDoneLocked(uint32_t index);
 
-    static const char* mStreamNames[CAM_STREAM_TYPE_MAX];
+    static const char* mStreamNames[CAM_STREAM_TYPE_MAX + 1];
     void flushFreeBatchBufQ();
 };
 
