@@ -51,6 +51,24 @@
       "message": "Hmmm, yours seems to be more proper. I will pick it too.",
       "revId": "f491593e7d8f54454d1b63c731df5d6518808648",
       "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    },
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "57e32e4f_3372133a",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 1
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 13648
+      },
+      "writtenOn": "2022-10-16T11:06:56Z",
+      "side": 1,
+      "message": "Done",
+      "parentUuid": "36a86fe8_788bfd39",
+      "revId": "f491593e7d8f54454d1b63c731df5d6518808648",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
     }
   ]
 }
