@@ -559,7 +559,7 @@ void QCamera3Channel::dumpYUV(mm_camera_buf_def_t *frame, cam_dimension_t dim,
                     break;
                 }
                 counter++;
-                int file_fd = open(buf, O_RDWR | O_CREAT, 0777);
+                int file_fd = open(buf, O_RDWR | O_CREAT, 0600);
                 ssize_t written_len = 0;
                 if (file_fd >= 0) {
                     void *data = NULL;
@@ -2638,7 +2638,7 @@ void QCamera3RawDumpChannel::dumpRawSnapshot(mm_camera_buf_def_t *frame)
                     timeinfo->tm_min, timeinfo->tm_sec,tv.tv_usec,
                     frame->frame_idx, dim.width, dim.height);
 
-            int file_fd = open(buf, O_RDWR| O_CREAT, 0777);
+            int file_fd = open(buf, O_RDWR| O_CREAT, 0600);
             if (file_fd >= 0) {
                 ssize_t written_len =
                         write(file_fd, frame->buffer, offset.frame_len);

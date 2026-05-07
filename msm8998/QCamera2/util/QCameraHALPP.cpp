@@ -319,9 +319,8 @@ void QCameraHALPP::dumpYUVtoFile(const uint8_t* pBuf, const char *name, ssize_t 
 {
     LOGD("E.");
 
-    int file_fd = open(name, O_RDWR | O_CREAT, 0777);
+    int file_fd = open(name, O_RDWR | O_CREAT, 0600);
     if (file_fd > 0) {
-        fchmod(file_fd, S_IRUSR | S_IWUSR | S_IRGRP | S_IROTH);
         ssize_t writen_bytes = 0;
         writen_bytes = write(file_fd, pBuf, buf_len);
         close(file_fd);

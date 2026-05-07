@@ -2347,7 +2347,7 @@ void QCameraMuxer::composeMpo(cam_compose_jpeg_info_t* main_Jpeg,
         snprintf(buf_main, sizeof(buf_main),
                 QCAMERA_DUMP_FRM_LOCATION "Main.jpg");
 
-        int file_fd_main = open(buf_main, O_RDWR | O_CREAT, 0777);
+        int file_fd_main = open(buf_main, O_RDWR | O_CREAT, 0600);
         if (file_fd_main >= 0) {
             ssize_t written_len = write(file_fd_main,
                     mpo_compose_info.primary_image.buf_vaddr,
@@ -2364,7 +2364,7 @@ void QCameraMuxer::composeMpo(cam_compose_jpeg_info_t* main_Jpeg,
         snprintf(buf_aux, sizeof(buf_aux),
                 QCAMERA_DUMP_FRM_LOCATION "Aux.jpg");
 
-        int file_fd_aux = open(buf_aux, O_RDWR | O_CREAT, 0777);
+        int file_fd_aux = open(buf_aux, O_RDWR | O_CREAT, 0600);
         if (file_fd_aux >= 0) {
             ssize_t written_len = write(file_fd_aux,
                     mpo_compose_info.aux_images[0].buf_vaddr,
@@ -2392,7 +2392,7 @@ void QCameraMuxer::composeMpo(cam_compose_jpeg_info_t* main_Jpeg,
         snprintf(buf_mpo, sizeof(buf_mpo),
                 QCAMERA_DUMP_FRM_LOCATION "Composed.MPO");
 
-        int file_fd_mpo = open(buf_mpo, O_RDWR | O_CREAT, 0777);
+        int file_fd_mpo = open(buf_mpo, O_RDWR | O_CREAT, 0600);
         if (file_fd_mpo >= 0) {
             ssize_t written_len = write(file_fd_mpo,
                     m_pRelCamMpoJpeg->data,

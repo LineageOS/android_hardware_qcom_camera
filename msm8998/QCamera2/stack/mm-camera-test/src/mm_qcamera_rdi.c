@@ -49,7 +49,7 @@ static void mm_app_rdi_dump_frame(mm_camera_buf_def_t *frame,
     if (frame != NULL) {
         snprintf(file_name, sizeof(file_name),
             QCAMERA_DUMP_FRM_LOCATION"%s_%03u.%s", name, frame_idx, ext);
-        file_fd = open(file_name, O_RDWR | O_CREAT, 0777);
+        file_fd = open(file_name, O_RDWR | O_CREAT, 0600);
         if (file_fd < 0) {
             LOGE(" cannot open file %s \n",  file_name);
         } else {
