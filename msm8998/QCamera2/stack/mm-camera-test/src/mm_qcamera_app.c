@@ -255,7 +255,7 @@ void mm_app_dump_frame(mm_camera_buf_def_t *frame,
     if ( frame != NULL) {
         snprintf(file_name, sizeof(file_name),
                 QCAMERA_DUMP_FRM_LOCATION"%s_%04d.%s", name, frame_idx, ext);
-        file_fd = open(file_name, O_RDWR | O_CREAT, 0777);
+        file_fd = open(file_name, O_RDWR | O_CREAT, 0600);
         if (file_fd < 0) {
             LOGE("cannot open file %s \n",  file_name);
         } else {
@@ -284,7 +284,7 @@ void mm_app_dump_jpeg_frame(const void * data, size_t size, char* name,
         snprintf(buf, sizeof(buf),
                 QCAMERA_DUMP_FRM_LOCATION"test/%s_%u.%s", name, index, ext);
         LOGD("%s size =%zu, jobId=%u",  buf, size, index);
-        file_fd = open(buf, O_RDWR | O_CREAT, 0777);
+        file_fd = open(buf, O_RDWR | O_CREAT, 0600);
         write(file_fd, data, size);
         close(file_fd);
     }
