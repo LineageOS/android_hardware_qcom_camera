@@ -1,0 +1,21 @@
+{
+  "comments": [
+    {
+      "unresolved": false,
+      "key": {
+        "uuid": "1d2ca060_04b1ffab",
+        "filename": "/PATCHSET_LEVEL",
+        "patchSetId": 2
+      },
+      "lineNbr": 0,
+      "author": {
+        "id": 16185
+      },
+      "writtenOn": "2026-05-13T19:33:04Z",
+      "side": 1,
+      "message": "heads up - none of these will be merged.\n\nYou did this all on a defunct unsupported branch.\n\n22.2 would have been proper - BUT 22.2 is on life-support, with only security patches and massive fixes, no new features/stuff like this.\n\nThis would be reviewed on current version 23.2 - but even then this all is still that deviates from upstream and makes monthly merges thousands of times harder - so the chances these would be merged would be low.\n\nBeyond that the fact that all these are weirdly squashed and not standalone commits is weird.\n\nAnd teh chmod file changes just won\u0027t be accepted period. That\u0027s so far from important in an android build tree.\n\nI\u0027d submit whatever you feel like to graphene, or AOSP, or somewhere else - LineageOS isn\u0027t going to be the proper place for these.",
+      "revId": "e7cdfb53874904b497a436ed736e6cb9de4bfb51",
+      "serverId": "1ec6b3db-b2c1-4fa4-84a2-4c7efe89ba71"
+    }
+  ]
+}
